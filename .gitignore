@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+*.egg-info/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Virtual environment
+virtualenv/
+venv/
+env/
+.env/
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg
+*.whl
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS generated files
+.DS_Store
+.Trashes
+thumbs.db
+
+# EnvVault specific
+*.env.enc
+*.env.dec
+*.temp_dec
