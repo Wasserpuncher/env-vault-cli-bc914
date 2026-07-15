@@ -105,6 +105,40 @@ python main.py decrypt my_app/.env.enc --print
 # DEBUG=False
 ```
 
+## Configuration File
+
+Instead of passing the key and output paths on every call, EnvVault CLI can read settings
+from a JSON configuration file (parsed with the Python standard library only, no extra
+dependencies). By default it looks for `.envvault.json` in the current directory; you can
+point to another file with `--config/-c` or the `ENVVAULT_CONFIG` environment variable.
+
+Example `.envvault.json`:
+
+```json
+{
+  "key_file": "secrets/project.key",
+  "output": "build/.env.enc"
+}
+```
+
+Usage:
+
+```bash
+python main.py --config .envvault.json encrypt my_app/.env
+python main.py -c prod.json decrypt build/.env.enc --print
+```
+
+* `key_file` points to a file that *contains* the Fernet key, so you no longer have to
+  pass `-k` or export `ENVVAULT_KEY` for each command.
+* `output` sets the default output path used when `-o` is omitted.
+
+**Precedence (highest wins):**
+* Key material: `-k/--key` flag > config `key_file` > `ENVVAULT_KEY` environment variable.
+* Output path: `-o/--output` flag > config `output` > `<input>.enc` / `<input>.dec` default.
+
+> **Security:** The configuration file only references a key *file* via `key_file`; it must
+> never contain the raw key. A config that includes a `key`/`secret_key` field is rejected.
+
 ## Security Considerations
 
 *   **Key Management**: The security of your encrypted environment variables directly depends on the security of your Fernet key. **Never commit your encryption key to version control.** Store it in a secure location (e.g., a dedicated secrets manager, KMS, or a secure environment variable injection system for CI/CD).

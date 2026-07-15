@@ -1,9 +1,90 @@
 import argparse
 import os
 import sys
-from typing import Literal, Dict
+import json
+from typing import Any, Literal, Dict, Optional, Tuple
 
 from cryptography.fernet import Fernet, InvalidToken
+
+# Standardname der Konfigurationsdatei, die im aktuellen Verzeichnis gesucht wird.
+DEFAULT_CONFIG_FILENAME = ".envvault.json"
+# Umgebungsvariable, die auf eine alternative Konfigurationsdatei zeigen kann.
+CONFIG_ENV_VAR = "ENVVAULT_CONFIG"
+
+
+class EnvVaultConfigError(Exception):
+    """Fehler beim Laden oder Validieren der Konfigurationsdatei."""
+    pass
+
+
+def _discover_config_path(cli_config_path: Optional[str]) -> Tuple[str, bool]:
+    """Ermittelt den Pfad zur Konfigurationsdatei und ob er explizit gewünscht ist.
+
+    Vorrang der Fundstelle: ``--config``-Flag > Umgebungsvariable ``ENVVAULT_CONFIG``
+    > Standarddatei ``.envvault.json`` im aktuellen Verzeichnis.
+    """
+    if cli_config_path:
+        return cli_config_path, True
+    env_config = os.environ.get(CONFIG_ENV_VAR)
+    if env_config:
+        return env_config, True
+    return DEFAULT_CONFIG_FILENAME, False
+
+
+def load_config(cli_config_path: Optional[str] = None) -> Dict[str, Any]:
+    """Lädt die JSON-Konfigurationsdatei (nur Standardbibliothek).
+
+    Eine explizit angeforderte Datei (via ``--config`` oder ``ENVVAULT_CONFIG``) muss
+    existieren; die implizite Standarddatei darf fehlen (dann wird ``{}`` geliefert).
+
+    Raises:
+        EnvVaultConfigError: Wenn die Datei fehlt (obwohl explizit angefordert),
+                             ungültiges JSON enthält oder kein JSON-Objekt ist.
+    """
+    path, explicit = _discover_config_path(cli_config_path)
+    if not os.path.exists(path):
+        if explicit:
+            raise EnvVaultConfigError(f"Configuration file '{path}' not found.")
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        raise EnvVaultConfigError(f"Could not read configuration file '{path}': {e}")
+    if not isinstance(data, dict):
+        raise EnvVaultConfigError(f"Configuration file '{path}' must contain a JSON object.")
+    # Sicherheit: In die Config gehören nur Pfade/Einstellungen, niemals der rohe Schlüssel.
+    if 'key' in data or 'secret_key' in data:
+        raise EnvVaultConfigError(
+            "Configuration file must not contain a raw key. Use 'key_file' to "
+            "reference a key file or the ENVVAULT_KEY environment variable instead."
+        )
+    return data
+
+
+def _resolve_key(cli_key: Optional[str], config: Dict[str, Any]) -> Optional[str]:
+    """Löst das Schlüsselmaterial nach der Vorrangregel auf.
+
+    Vorrang: ``-k/--key`` (roher Schlüssel) > Config ``key_file`` (Schlüssel aus Datei)
+    > Umgebungsvariable ``ENVVAULT_KEY`` (roher Schlüssel).
+
+    Returns:
+        Optional[str]: Der rohe Fernet-Schlüssel als String oder None, wenn keiner
+                       gefunden wurde.
+
+    Raises:
+        EnvVaultConfigError: Wenn die in der Config referenzierte Schlüsseldatei fehlt.
+    """
+    if cli_key:
+        return cli_key
+    key_file = config.get('key_file')
+    if key_file:
+        if not os.path.exists(key_file):
+            raise EnvVaultConfigError(f"Key file '{key_file}' referenced in config not found.")
+        with open(key_file, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    return os.environ.get("ENVVAULT_KEY")
+
 
 class EnvVault:
     """
@@ -134,11 +215,21 @@ def main():
     )
 
     # Argument für den Schlüssel, optional über Umgebungsvariable ENVVAULT_KEY.
+    # Standard ist None; die Auflösung (Flag > Config-Schlüsseldatei > ENVVAULT_KEY)
+    # erfolgt nach dem Parsen in _resolve_key().
     parser.add_argument(
         "-k", "--key",
         type=str,
-        default=os.environ.get("ENVVAULT_KEY"),
-        help="Der Fernet-Verschlüsselungsschlüssel (Base64-kodiert). Kann auch über die Umgebungsvariable ENVVAULT_KEY gesetzt werden."
+        default=None,
+        help="Der Fernet-Verschlüsselungsschlüssel (Base64-kodiert). Kann auch über die Umgebungsvariable ENVVAULT_KEY oder eine per Config referenzierte Schlüsseldatei gesetzt werden."
+    )
+
+    # Argument für die JSON-Konfigurationsdatei (Standard: .envvault.json, falls vorhanden).
+    parser.add_argument(
+        "-c", "--config",
+        type=str,
+        default=None,
+        help="Pfad zu einer JSON-Konfigurationsdatei (Standard: .envvault.json, falls vorhanden). Setzt z.B. 'key_file' und 'output'."
     )
 
     # Subparser für verschiedene Befehle (generate-key, encrypt, decrypt).
@@ -200,13 +291,21 @@ def main():
 
     # Überprüfen, ob ein Schlüssel für Ver- und Entschlüsselungsbefehle vorhanden ist.
     if args.command in ["encrypt", "decrypt"]:
-        if not args.key:
+        # Konfigurationsdatei laden (optional). Vorrang: Flag > Config > Env > Default.
+        try:
+            config = load_config(args.config)
+            key = _resolve_key(args.key, config)
+        except EnvVaultConfigError as e:
+            print(f"Fehler: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        if not key:
             # Schlüssel ist zwingend erforderlich für diese Operationen.
-            print("Fehler: Ein Fernet-Schlüssel ist erforderlich. Verwenden Sie -k oder setzen Sie ENVVAULT_KEY.", file=sys.stderr)
+            print("Fehler: Ein Fernet-Schlüssel ist erforderlich. Verwenden Sie -k, setzen Sie ENVVAULT_KEY oder 'key_file' in der Config.", file=sys.stderr)
             sys.exit(1)
         try:
             # Den Schlüssel dekodieren, da Fernet Bytes erwartet.
-            fernet_key = args.key.encode('utf-8')
+            fernet_key = key.encode('utf-8')
             vault = EnvVault(fernet_key)
         except Exception as e:
             # Fehler beim Initialisieren des Schlüssels abfangen, z.B. bei ungültigem Base64-Format.
@@ -218,8 +317,8 @@ def main():
             try:
                 # Datei verschlüsseln und die verarbeiteten Variablen erhalten.
                 processed_vars = vault.process_env_file(args.input, 'encrypt')
-                # Ausgabepfad bestimmen.
-                output_path = args.output if args.output else f"{args.input}.enc"
+                # Ausgabepfad bestimmen (Flag > Config > Default).
+                output_path = args.output or config.get('output') or f"{args.input}.enc"
                 # Verarbeitete Variablen formatieren und in die Ausgabedatei schreiben.
                 output_content = vault._format_env_vars(processed_vars)
                 with open(output_path, 'w', encoding='utf-8') as f:
@@ -242,8 +341,8 @@ def main():
                     # Wenn --print gesetzt ist, auf stdout ausgeben.
                     print(output_content)
                 else:
-                    # Sonst in eine Ausgabedatei schreiben.
-                    output_path = args.output if args.output else f"{args.input}.dec"
+                    # Sonst in eine Ausgabedatei schreiben (Flag > Config > Default).
+                    output_path = args.output or config.get('output') or f"{args.input}.dec"
                     with open(output_path, 'w', encoding='utf-8') as f:
                         f.write(output_content)
                     print(f"Datei '{args.input}' erfolgreich entschlüsselt nach '{output_path}'.")
