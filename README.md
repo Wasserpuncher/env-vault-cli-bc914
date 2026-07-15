@@ -1,6 +1,6 @@
 # EnvVault CLI: Secure Environment Variable Management
 
-[![Python CI/CD](https://github.com/your-username/env-vault-cli/actions/workflows/python-app.yml/badge.svg)](https://github.com/your-username/env-vault-cli/actions/workflows/python-app.yml)
+[![Python CI/CD](https://github.com/Wasserpuncher/env-vault-cli-bc914/actions/workflows/python-app.yml/badge.svg)](https://github.com/Wasserpuncher/env-vault-cli-bc914/actions/workflows/python-app.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 EnvVault CLI is an enterprise-ready, open-source command-line utility designed to securely encrypt and decrypt environment variables stored in `.env` files. It's built for developers, DevOps engineers, and CI/CD pipelines that require a robust solution for managing sensitive configuration data.
@@ -27,7 +27,7 @@ EnvVault CLI is an enterprise-ready, open-source command-line utility designed t
 
 3.  **Manual Installation (from source)**:
     ```bash
-    git clone https://github.com/your-username/env-vault-cli.git
+    git clone https://github.com/Wasserpuncher/env-vault-cli-bc914.git
     cd env-vault-cli
     python3 -m venv venv
     source venv/bin/activate # On Windows: .\venv\Scripts\activate
