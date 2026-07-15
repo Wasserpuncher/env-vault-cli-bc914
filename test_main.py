@@ -32,7 +32,7 @@ class MockFernet:
         return encrypted_value[len(b"MOCKED_ENCRYPTED_"):]
 
 @pytest.fixture
-def env_vault_instance():
+def env_vault_instance(mock_fernet_patch):
     """Fixture für eine EnvVault-Instanz mit einem Testschlüssel."""
     # Erstellt eine EnvVault-Instanz mit dem TEST_KEY.
     return EnvVault(TEST_KEY.encode('utf-8'))
